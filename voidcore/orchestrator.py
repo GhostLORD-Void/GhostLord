@@ -63,6 +63,10 @@ class Orchestrator:
             self.audit.log_action("TASK_ERROR", {"task_id": task_id, "error": str(e)})
             return {"task_id": task_id, "status": "error", "error": str(e), "duration_s": duration}
 
+    def run(self, task_type: str = "generic", payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Execute a single task — main entry point for autonomous execution."""
+        return self.execute_task(task_type, payload or {})
+
     def _execute_recon(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         from nulleye.recon import ReconEngine
         engine = ReconEngine()

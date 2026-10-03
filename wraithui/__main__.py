@@ -1,11 +1,21 @@
 """Run WraithUI TUI directly via `python -m wraithui`."""
 
-from wraithui.tui import GhostLordTUI
+import sys
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(name)s - %(levelname)s - %(message)s')
 
 def main():
-    tui = GhostLordTUI()
-    print(tui.render_banner())
-    tui.start()
+    print("GhostLord v3.0 — WraithUI Terminal")
+    try:
+        from wraithui.tui import GhostLordTUI
+        tui = GhostLordTUI()
+        print(tui.render_banner())
+        tui.start()
+    except Exception as e:
+        print(f"TUI init error: {e}")
+        print("Run 'python -m wraithui.tui' for full TUI execution.")
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
