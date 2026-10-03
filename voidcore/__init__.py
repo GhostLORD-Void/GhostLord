@@ -1,7 +1,3 @@
-"""VoidCore — Autonomous task orchestration engine for GhostLord v3.0."""
+"""VoidCore — GhostLord v3.0 Orchestrator Engine."""
 
 __version__ = "3.0.0"
-
-
-def get_version():
-    return __version__
