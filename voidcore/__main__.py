@@ -12,7 +12,7 @@ logging.basicConfig(
 def main():
     print("GhostLord v3.0 — VoidCore Standalone Termux Agent")
     print("=" * 50)
-    print("Hinglish/NLP command parser ACTIVE")
+    print("Hinglish/NLP command parser ACTIVE (v2)")
     print("Type commands in Hinglish or English — real Termux execution")
     print("")
 
@@ -44,7 +44,6 @@ def main():
                 print("GhostLord shutting down.")
                 break
 
-            # Use the Hinglish NLP parser
             result = orch.parse_and_run(user_input)
             print(json.dumps(result, indent=2))
 
