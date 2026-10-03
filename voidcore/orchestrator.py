@@ -7,13 +7,15 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("voidcore.orchestrator")
 
-# Hinglish-to-command mappings
-HINGLISH_COMMANDS = {
+# Hinglish-to-command mappings (exact phrase triggers)
+HINGLISH_TRIGGERS = {
     # Scan commands
     "scan karo": {"type": "scan", "default_target": "192.168.1.0/24", "default_ports": "1-1024"},
     "scan karna": {"type": "scan", "default_target": "192.168.1.0/24", "default_ports": "1-1024"},
-    "network scan": {"type": "scan", "default_target": "192.168.1.0/24", "default_ports": "1-1024"},
+    "scan kar": {"type": "scan", "default_target": "192.168.1.0/24", "default_ports": "1-1024"},
     "taermux scan": {"type": "scan", "default_target": "192.168.1.0/24", "default_ports": "1-65535"},
+    "termux scan": {"type": "scan", "default_target": "192.168.1.0/24", "default_ports": "1-65535"},
+    "network scan": {"type": "scan", "default_target": "192.168.1.0/24", "default_ports": "1-1024"},
     "full scan": {"type": "scan", "default_target": "192.168.1.0/24", "default_ports": "1-65535"},
     "quick scan": {"type": "scan", "default_target": "192.168.1.0/24", "default_ports": "22,80,443,3306"},
 
@@ -25,64 +27,50 @@ HINGLISH_COMMANDS = {
     "fingerprint": {"type": "recon", "default_target": "192.168.1.0/24"},
 
     # Execute commands
-    "execute": {"type": "execute"},
     "run": {"type": "execute"},
     "chalana": {"type": "execute"},
     "command run": {"type": "execute"},
     "shell": {"type": "execute"},
-    "term": {"type": "execute"},
-    "terminal": {"type": "execute"},
 
     # Crack commands
     "crack karo": {"type": "crack"},
     "hash crack": {"type": "crack"},
     "password crack": {"type": "crack"},
-    "john": {"type": "crack"},
-    "hashcat": {"type": "crack"},
 
     # Exploit commands
     "exploit": {"type": "exploit"},
     "attack": {"type": "exploit"},
     "breach": {"type": "exploit"},
-    "vulnerability": {"type": "exploit"},
-    "exploit karo": {"type": "exploit"},
 
     # Enum commands
     "enum": {"type": "enum"},
     "enumerate": {"type": "enum"},
     "smb enum": {"type": "enum"},
-    "share enum": {"type": "enum"},
 
     # Exfil commands
     "exfil": {"type": "exfil"},
     "data steal": {"type": "exfil"},
-    "extract": {"type": "exfil"},
 
     # Crawl commands
     "crawl": {"type": "crawl"},
     "web crawl": {"type": "crawl"},
     "scrape": {"type": "crawl"},
-    "fetch": {"type": "crawl"},
 
-    # Status
+    # Status / info
     "status": {"type": "execute", "default_code": "echo GhostLord v3.0 — Standalone Termux Agent"},
     "kaun hai": {"type": "execute", "default_code": "echo NEXUS — Surgical Architect of the Void"},
     "whoami": {"type": "execute", "default_code": "whoami"},
     "pwd": {"type": "execute", "default_code": "pwd"},
     "list": {"type": "execute", "default_code": "ls -la"},
-    "files": {"type": "execute", "default_code": "ls -la"},
     "ip": {"type": "execute", "default_code": "ifconfig || ip addr"},
     "network": {"type": "execute", "default_code": "ip addr"},
     "dns": {"type": "execute", "default_code": "cat /etc/resolv.conf"},
     "packages": {"type": "execute", "default_code": "pkg list-installed"},
-    "who": {"type": "execute", "default_code": "whoami && id"},
 }
 
-# Keywords that indicate a target is being specified
-TARGET_KEYWORDS = ["target", "ip", "host", "machine", "server", "website", "url", "domain", "address", "endpoint"]
-
-# Keywords that indicate a port is being specified
-PORT_KEYWORDS = ["port", "ports", "range", "scan all", "full scan"]
+# Words to strip ONLY when they appear as standalone trailing tokens
+# (not as part of a command or argument)
+FILLER_WORDS = {"karo", "karna", "karlo", "kare", "kar", "ko", "se", "mein", "par", "koi", "kuch", "ka", "ke", "la", "le", "den", "de", "do", "du", "ta", "se", "na", "ne"}
 
 
 class Orchestrator:
@@ -130,7 +118,11 @@ class Orchestrator:
     def parse_and_run(self, raw_input: str) -> Dict[str, Any]:
         """Parse natural language / Hinglish input and execute the appropriate command.
 
-        This is the main entry point for interactive use.
+        Strategy:
+        1. Try exact Hinglish trigger match (longest first)
+        2. Extract the remainder as the shell command/arguments
+        3. Strip standalone filler words from the END of the remainder only
+        4. If no trigger matches, treat entire input as a shell command
         """
         self._task_counter += 1
         task_id = f"task_{self._task_counter:04d}"
@@ -139,56 +131,84 @@ class Orchestrator:
         if not raw:
             return {"task_id": task_id, "status": "error", "error": "Empty input"}
 
-        # Step 1: Try exact Hinglish command match
-        for hword, mapping in HINGLISH_COMMANDS.items():
-            if hword in raw.lower():
-                task_type = mapping["type"]
-                payload = {}
-                # Extract target from input
-                for kw in TARGET_KEYWORDS:
-                    pattern = rf"{kw}\s*[:=]?\s*(\S+)"
-                    m = re.search(pattern, raw, re.IGNORECASE)
-                    if m:
-                        payload["target"] = m.group(1)
-                        break
-                # Extract port from input
-                for kw in PORT_KEYWORDS:
-                    if kw in raw.lower():
-                        port_pattern = r"port[s]?\s*[:=]?\s*(\S+)"
-                        pm = re.search(port_pattern, raw, re.IGNORECASE)
-                        if pm:
-                            payload["ports"] = pm.group(1)
-                        break
-                # Extract code for execute type
-                if task_type == "execute" and "default_code" in mapping:
-                    payload["code"] = mapping["default_code"]
-                # If user typed a command after the keyword, use it as code
-                if task_type == "execute":
-                    # Extract the command part after the Hinglish keyword
-                    for hword2, mapping2 in HINGLISH_COMMANDS.items():
-                        if hword2 in raw.lower():
-                            code_part = raw.lower().replace(hword2, "").strip()
-                            # Remove common filler words
-                            for filler in ["karo", "karna", "karlo", "kare", "kar"]:
-                                code_part = code_part.replace(filler, "").strip()
-                            if code_part:
-                                payload["code"] = code_part
-                            break
+        lower_raw = raw.lower()
 
-                logger.info("Parsed input '%s' -> task_type=%s, payload=%s", raw, task_type, payload)
-                return self.run(task_type, payload)
+        # Step 1: Find the longest matching Hinglish trigger
+        best_trigger = None
+        best_len = 0
+        for trigger, mapping in HINGLISH_TRIGGERS.items():
+            if trigger in lower_raw and len(trigger) > best_len:
+                best_trigger = trigger
+                best_len = len(trigger)
+                best_mapping = mapping
 
-        # Step 2: If no Hinglish match, try to detect if it looks like a shell command
-        # (contains common Linux commands)
-        shell_commands = ["nmap", "curl", "sqlmap", "msfconsole", "hashcat", "john",
-                          "whoami", "pwd", "ls", "ifconfig", "ip ", "nslookup",
-                          "dig", "netstat", "ss ", "wget", "python", "python3"]
-        for cmd in shell_commands:
-            if raw.lower().startswith(cmd):
-                return self.run("execute", {"code": raw})
+        if best_trigger:
+            # Extract remainder after the trigger
+            trigger_pos = lower_raw.index(best_trigger)
+            remainder = raw[trigger_pos + len(best_trigger):].strip()
 
-        # Step 3: Default — treat as shell command
-        return self.run("execute", {"code": raw})
+            # Strip standalone filler words from the END of remainder only
+            # Split into tokens, remove trailing fillers, rejoin
+            tokens = remainder.split()
+            while tokens and tokens[-1].lower() in FILLER_WORDS:
+                tokens.pop()
+            remainder = " ".join(tokens)
+
+            task_type = best_mapping["type"]
+            payload = {}
+
+            # Extract target from remainder
+            target_patterns = [
+                r"target[:\s]+(\S+)",
+                r"ip[:\s]+(\S+)",
+                r"host[:\s]+(\S+)",
+                r"machine[:\s]+(\S+)",
+                r"server[:\s]+(\S+)",
+                r"website[:\s]+(\S+)",
+                r"url[:\s]+(\S+)",
+                r"domain[:\s]+(\S+)",
+            ]
+            for pat in target_patterns:
+                m = re.search(pat, remainder, re.IGNORECASE)
+                if m:
+                    payload["target"] = m.group(1)
+                    break
+
+            # Extract ports from remainder
+            port_match = re.search(r"port[s]?[:\s]+(\S+)", remainder, re.IGNORECASE)
+            if port_match:
+                payload["ports"] = port_match.group(1)
+
+            # For execute type, use remainder as the shell command
+            if task_type == "execute":
+                if "default_code" in best_mapping:
+                    payload["code"] = best_mapping["default_code"]
+                elif remainder:
+                    payload["code"] = remainder
+                else:
+                    payload["code"] = ""
+
+            # For scan type with no target, use default
+            if task_type == "scan" and "target" not in payload:
+                payload["target"] = best_mapping.get("default_target", "")
+                payload["ports"] = best_mapping.get("default_ports", "1-65535")
+
+            # For recon type with no target, use default
+            if task_type == "recon" and "target" not in payload:
+                payload["target"] = best_mapping.get("default_target", "")
+
+            logger.info("Parsed '%s' -> trigger='%s', task_type=%s, payload=%s", raw, best_trigger, task_type, payload)
+            return self.run(task_type, payload)
+
+        # Step 2: No Hinglish trigger match — treat as raw shell command
+        # But strip trailing filler words first
+        tokens = raw.split()
+        while tokens and tokens[-1].lower() in FILLER_WORDS:
+            tokens.pop()
+        cleaned_command = " ".join(tokens)
+
+        logger.info("No Hinglish trigger for '%s' — treating as shell command: %s", raw, cleaned_command)
+        return self.run("execute", {"code": cleaned_command})
 
     def _exec_cmd(self, cmd: str, timeout: int = 60) -> Dict[str, Any]:
         """Execute a raw shell command on Termux."""
@@ -270,11 +290,11 @@ class Orchestrator:
     def get_status(self) -> Dict[str, Any]:
         return {
             "engine": "voidcore",
-            "version": "3.0.0",
+            "version": "3.0.1",
             "platform": "termux",
             "tasks_executed": self._task_counter,
             "results_count": len(self._results),
-            "parser": "hinglish_nlp",
+            "parser": "hinglish_nlp_v2",
         }
 
     def get_results(self) -> List[Dict[str, Any]]:
